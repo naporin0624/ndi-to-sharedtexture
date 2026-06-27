@@ -67,6 +67,17 @@ pub fn match_source(names: &[String], query: &str) -> SourceMatch {
     }
 }
 
+pub fn parse_selection(input: &str, count: usize) -> Result<usize, String> {
+    let n: usize = input
+        .trim()
+        .parse()
+        .map_err(|_| format!("'{}' is not a number", input.trim()))?;
+    if n == 0 || n > count {
+        return Err(format!("choose 1..={}", count));
+    }
+    Ok(n - 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +118,30 @@ mod tests {
             SourceMatch::One(i) => assert_eq!(i, 0),
             other => panic!("expected One, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn selection_valid_is_zero_based() {
+        assert_eq!(parse_selection("2", 3), Ok(1));
+    }
+
+    #[test]
+    fn selection_trims_whitespace() {
+        assert_eq!(parse_selection("  1\n", 3), Ok(0));
+    }
+
+    #[test]
+    fn selection_zero_is_error() {
+        assert!(parse_selection("0", 3).is_err());
+    }
+
+    #[test]
+    fn selection_out_of_range_is_error() {
+        assert!(parse_selection("4", 3).is_err());
+    }
+
+    #[test]
+    fn selection_non_numeric_is_error() {
+        assert!(parse_selection("abc", 3).is_err());
     }
 }
