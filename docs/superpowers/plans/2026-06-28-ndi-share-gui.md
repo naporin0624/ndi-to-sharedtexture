@@ -697,63 +697,67 @@ fn spawn_discovery(tx: Sender<DiscoverMsg>, ctx: egui::Context) {
     });
 }
 
+// NOTE: eframe 0.35's `App` trait requires `fn ui(&mut self, ui: &mut egui::Ui,
+// frame: &mut Frame)` — the older `fn update(&mut self, ctx, frame)` does NOT
+// exist in 0.35. The `ui` param IS the central panel's Ui (the framework wraps
+// it for you), so build directly into `ui` — no `CentralPanel` wrapper. Get the
+// Context via `ui.ctx()` (clone it once up front for the worker spawns + repaint).
 impl eframe::App for GuiApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_discovery();
+        let ctx = ui.ctx().clone();
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(format!("NDI \u{2192} {}", ndi_share::output::output_kind()));
-            ui.add_space(8.0);
+        ui.heading(format!("NDI \u{2192} {}", ndi_share::output::output_kind()));
+        ui.add_space(8.0);
 
-            // Source dropdown. Split borrows so the closure can hold
-            // `&sources` and `&mut selected` at once.
-            ui.horizontal(|ui| {
-                ui.label("Source:");
-                let prev = self.selected;
-                let sources = &self.sources;
-                let selected = &mut self.selected;
-                let label = sources
-                    .get(*selected)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_else(|| "(none)".to_owned());
-                ui.add_enabled_ui(!sources.is_empty(), |ui| {
-                    egui::ComboBox::from_id_source("ndi_source")
-                        .selected_text(label)
-                        .show_ui(ui, |ui| {
-                            for (i, s) in sources.iter().enumerate() {
-                                ui.selectable_value(selected, i, &s.name);
-                            }
-                        });
-                });
-                // If the user picked a different source and hasn't hand-edited
-                // the name, follow the source name.
-                if self.selected != prev && !self.name_edited {
-                    if let Some(s) = self.sources.get(self.selected) {
-                        self.name = s.name.clone();
-                    }
+        // Source dropdown. Split borrows so the closure can hold
+        // `&sources` and `&mut selected` at once.
+        ui.horizontal(|ui| {
+            ui.label("Source:");
+            let prev = self.selected;
+            let sources = &self.sources;
+            let selected = &mut self.selected;
+            let label = sources
+                .get(*selected)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "(none)".to_owned());
+            ui.add_enabled_ui(!sources.is_empty(), |ui| {
+                egui::ComboBox::from_id_source("ndi_source")
+                    .selected_text(label)
+                    .show_ui(ui, |ui| {
+                        for (i, s) in sources.iter().enumerate() {
+                            ui.selectable_value(selected, i, &s.name);
+                        }
+                    });
+            });
+            // If the user picked a different source and hasn't hand-edited
+            // the name, follow the source name.
+            if self.selected != prev && !self.name_edited {
+                if let Some(s) = self.sources.get(self.selected) {
+                    self.name = s.name.clone();
                 }
-            });
-
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(!self.discovering, |ui| {
-                    if ui.button("\u{1F504} Refresh").clicked() {
-                        self.start_discovery(ctx);
-                    }
-                });
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Name:");
-                if ui.text_edit_singleline(&mut self.name).changed() {
-                    self.name_edited = true;
-                }
-            });
-
-            ui.add_space(8.0);
-            if !self.status.is_empty() {
-                ui.label(&self.status);
             }
         });
+
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(!self.discovering, |ui| {
+                if ui.button("\u{1F504} Refresh").clicked() {
+                    self.start_discovery(&ctx);
+                }
+            });
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Name:");
+            if ui.text_edit_singleline(&mut self.name).changed() {
+                self.name_edited = true;
+            }
+        });
+
+        ui.add_space(8.0);
+        if !self.status.is_empty() {
+            ui.label(&self.status);
+        }
 
         if self.discovering {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
@@ -920,9 +924,9 @@ Initialize `running: None` in `GuiApp::new`.
     }
 ```
 
-- [ ] **Step 4: Render Start/Stop + live status in `update`**
+- [ ] **Step 4: Render Start/Stop + live status in `ui`**
 
-In `update`, call `self.poll_running();` right after `self.poll_discovery();`.
+In the `fn ui` body (Task 6), call `self.poll_running();` right after `self.poll_discovery();`. The `let ctx = ui.ctx().clone();` line from Task 6 is reused here — pass `&ctx` to `self.start(...)`.
 
 While running, disable the form. Wrap the existing source/refresh/name rows in `ui.add_enabled_ui(self.running.is_none(), |ui| { ... })`. Then add the button row (after the Name row, before the status label):
 
@@ -936,7 +940,7 @@ While running, disable the form. Wrap the existing source/refresh/name rows in `
                             .add_enabled(can_start, egui::Button::new("\u{25B6} Start"))
                             .clicked()
                         {
-                            self.start(ctx);
+                            self.start(&ctx);
                         }
                     }
                     Some(handle) => {
@@ -957,7 +961,7 @@ While running, disable the form. Wrap the existing source/refresh/name rows in `
             });
 ```
 
-Update the repaint trigger at the end of `update` so it ticks while running too:
+Update the repaint trigger at the end of the `fn ui` body (replacing the `if self.discovering { … }` block from Task 6) so it ticks while running too:
 
 ```rust
         if self.discovering || self.running.is_some() {
