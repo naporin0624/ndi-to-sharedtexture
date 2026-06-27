@@ -1,10 +1,14 @@
 //! Minimal launcher GUI for ndi-share.
 
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver as MpscReceiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use eframe::egui;
-use ndi_share::ndi::{Finder, Ndi, Source};
+use ndi_share::ndi::{Finder, Ndi, Receiver, Source};
+use ndi_share::output::make_output;
+use ndi_share::run::run_capture_loop;
 
 /// Result of one discovery pass, sent from the worker to the UI.
 enum DiscoverMsg {
@@ -14,6 +18,41 @@ enum DiscoverMsg {
 
 const DISCOVER_TIMEOUT_MS: u32 = 2000;
 
+/// Shared between the UI thread and the receive worker.
+struct RunState {
+    /// `true` = keep running; UI sets `false` to request stop.
+    stop: AtomicBool,
+    /// Frames published so far (UI displays this live).
+    frames: AtomicU64,
+    /// Set by the worker if setup or the loop errored.
+    error: Mutex<Option<String>>,
+}
+
+impl RunState {
+    fn new() -> Self {
+        RunState {
+            stop: AtomicBool::new(true),
+            frames: AtomicU64::new(0),
+            error: Mutex::new(None),
+        }
+    }
+}
+
+/// Worker body: build the pipeline and pump frames until stopped.
+/// All FFI objects are created and dropped here — none cross threads.
+fn run_worker(source: &Source, name: &str, shared: &RunState) -> anyhow::Result<()> {
+    let ndi = Ndi::new()?;
+    let receiver = Receiver::new(&ndi, source, "ndi-share")?;
+    let mut out = make_output(name)?;
+    run_capture_loop(&receiver, &mut *out, &shared.stop, &shared.frames, false)?;
+    Ok(())
+}
+
+struct RunHandle {
+    shared: Arc<RunState>,
+    join: thread::JoinHandle<()>,
+}
+
 struct GuiApp {
     sources: Vec<Source>,
     selected: usize,
@@ -22,6 +61,7 @@ struct GuiApp {
     status: String,
     discovering: bool,
     disco_rx: Option<MpscReceiver<DiscoverMsg>>,
+    running: Option<RunHandle>,
 }
 
 impl GuiApp {
@@ -34,6 +74,7 @@ impl GuiApp {
             status: String::new(),
             discovering: false,
             disco_rx: None,
+            running: None,
         };
         app.start_discovery(ctx);
         app
@@ -78,6 +119,54 @@ impl GuiApp {
             }
         }
     }
+
+    fn start(&mut self, ctx: &egui::Context) {
+        let Some(source) = self.sources.get(self.selected).cloned() else { return };
+        let name = if self.name.trim().is_empty() {
+            source.name.clone()
+        } else {
+            self.name.clone()
+        };
+        let shared = Arc::new(RunState::new());
+        let worker_shared = shared.clone();
+        let ctx2 = ctx.clone();
+        let join = thread::spawn(move || {
+            if let Err(e) = run_worker(&source, &name, &worker_shared) {
+                *worker_shared.error.lock().unwrap() = Some(e.to_string());
+            }
+            ctx2.request_repaint();
+        });
+        self.status.clear();
+        self.running = Some(RunHandle { shared, join });
+    }
+
+    fn stop(&mut self) {
+        if let Some(handle) = self.running.take() {
+            handle.shared.stop.store(false, Ordering::SeqCst);
+            let _ = handle.join.join();
+            let frames = handle.shared.frames.load(Ordering::SeqCst);
+            self.status = format!("Stopped after {frames} frames.");
+        }
+    }
+
+    /// If the worker exited on its own (error or natural stop), surface it and reset.
+    fn poll_running(&mut self) {
+        let crashed = self
+            .running
+            .as_ref()
+            .map(|h| h.join.is_finished())
+            .unwrap_or(false);
+        if crashed {
+            if let Some(handle) = self.running.take() {
+                let _ = handle.join.join();
+                let err = handle.shared.error.lock().unwrap().take();
+                self.status = match err {
+                    Some(e) => format!("Error: {e}"),
+                    None => "Stopped.".to_owned(),
+                };
+            }
+        }
+    }
 }
 
 /// Run `Finder::list` off the UI thread, then wake the UI.
@@ -105,61 +194,110 @@ fn spawn_discovery(tx: Sender<DiscoverMsg>, ctx: egui::Context) {
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_discovery();
+        self.poll_running();
         let ctx = ui.ctx().clone();
 
         ui.heading(format!("NDI \u{2192} {}", ndi_share::output::output_kind()));
         ui.add_space(8.0);
 
-        // Source dropdown. Split borrows so the closure can hold
-        // `&sources` and `&mut selected` at once.
-        ui.horizontal(|ui| {
-            ui.label("Source:");
-            let prev = self.selected;
-            let sources = &self.sources;
-            let selected = &mut self.selected;
-            let label = sources
-                .get(*selected)
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| "(none)".to_owned());
-            ui.add_enabled_ui(!sources.is_empty(), |ui| {
-                egui::ComboBox::from_id_salt("ndi_source")
-                    .selected_text(label)
-                    .show_ui(ui, |ui| {
-                        for (i, s) in sources.iter().enumerate() {
-                            ui.selectable_value(selected, i, &s.name);
-                        }
-                    });
-            });
-            // If the user picked a different source and hasn't hand-edited
-            // the name, follow the source name.
-            if self.selected != prev && !self.name_edited {
-                if let Some(s) = self.sources.get(self.selected) {
-                    self.name = s.name.clone();
-                }
-            }
-        });
-
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(!self.discovering, |ui| {
-                if ui.button("\u{1F504} Refresh").clicked() {
-                    self.start_discovery(&ctx);
+        // Disable the form while running so the user cannot change inputs mid-capture.
+        ui.add_enabled_ui(self.running.is_none(), |ui| {
+            // Source dropdown. Split borrows so the closure can hold
+            // `&sources` and `&mut selected` at once.
+            ui.horizontal(|ui| {
+                ui.label("Source:");
+                let prev = self.selected;
+                let sources = &self.sources;
+                let selected = &mut self.selected;
+                let label = sources
+                    .get(*selected)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| "(none)".to_owned());
+                ui.add_enabled_ui(!sources.is_empty(), |ui| {
+                    egui::ComboBox::from_id_salt("ndi_source")
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            for (i, s) in sources.iter().enumerate() {
+                                ui.selectable_value(selected, i, &s.name);
+                            }
+                        });
+                });
+                // If the user picked a different source and hasn't hand-edited
+                // the name, follow the source name.
+                if self.selected != prev && !self.name_edited {
+                    if let Some(s) = self.sources.get(self.selected) {
+                        self.name = s.name.clone();
+                    }
                 }
             });
+
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(!self.discovering, |ui| {
+                    if ui.button("\u{1F504} Refresh").clicked() {
+                        self.start_discovery(&ctx);
+                    }
+                });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                if ui.text_edit_singleline(&mut self.name).changed() {
+                    self.name_edited = true;
+                }
+            });
         });
 
-        ui.horizontal(|ui| {
-            ui.label("Name:");
-            if ui.text_edit_singleline(&mut self.name).changed() {
-                self.name_edited = true;
-            }
-        });
-
+        // Start/Stop button row.
+        // Pre-compute state flags to avoid borrow conflicts inside the closure:
+        // `match &self.running` would hold an immutable borrow that conflicts
+        // with `self.start()`/`self.stop()` which need `&mut self`.
         ui.add_space(8.0);
+        let is_running = self.running.is_some();
+        let can_start = !self.sources.is_empty();
+        let run_frames = self
+            .running
+            .as_ref()
+            .map(|h| h.shared.frames.load(Ordering::SeqCst))
+            .unwrap_or(0);
+        let run_source = self
+            .sources
+            .get(self.selected)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "?".to_owned());
+
+        let mut start_clicked = false;
+        let mut stop_clicked = false;
+        ui.horizontal(|ui| {
+            if !is_running {
+                if ui
+                    .add_enabled(can_start, egui::Button::new("\u{25B6} Start"))
+                    .clicked()
+                {
+                    start_clicked = true;
+                }
+            } else {
+                if ui.button("\u{25A0} Stop").clicked() {
+                    stop_clicked = true;
+                }
+                ui.label(format!(
+                    "\u{25CF} Running \u{2014} {} as {} \u{2014} {run_frames} frames",
+                    run_source,
+                    ndi_share::output::output_kind(),
+                ));
+            }
+        });
+        if start_clicked {
+            self.start(&ctx);
+        }
+        if stop_clicked {
+            self.stop();
+        }
+
         if !self.status.is_empty() {
             ui.label(&self.status);
         }
 
-        if self.discovering {
+        if self.discovering || self.running.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
     }
