@@ -57,9 +57,27 @@ ndi-share --source Cam --name "MyFeed"    # Syphon 公開名を指定（既定: 
 
 配信を受け取るには Syphon 対応アプリ（Resolume、Syphon Recorder、OBS の Syphon プラグインなど）を開いてください。停止は **Ctrl-C** です。
 
+## Windows / Spout（実験的・未検証）
+
+Windows では Spout 出力に対応します（`SharedTextureOutput` trait による抽象化で、macOS=Syphon / Windows=Spout を切り替え）。
+
+> ⚠️ **注意:** Windows/Spout バックエンドは現状 **GitHub Actions（windows-latest）でのコンパイル検証のみ**で、実機での動作確認は未実施です。色順・上下反転・SpoutDX 初期化まわりは実機検証で調整が必要な可能性があります。
+
+ビルド手順（Windows / PowerShell）:
+
+```powershell
+./scripts/fetch-spout2.ps1            # vendor/Spout2 へ Spout2 SDK を取得
+# NDI SDK をインストール（Processing.NDI.Lib.x64.lib を提供）
+#   インストール先が標準と異なる場合は環境変数 NDI_SDK_DIR を設定
+cargo build --release
+```
+
+NDI のインポートライブラリは `%NDI_SDK_DIR%\Lib\x64\Processing.NDI.Lib.x64.lib`（既定 `C:\Program Files\NDI\NDI 6 SDK`）を参照します。実行時は NDI ランタイム DLL が PATH 上にある必要があります。受信は Spout 対応アプリ（Resolume、OBS の Spout プラグインなど）で行います。
+
 ## 対応範囲
 
-v1 は **macOS / Syphon のみ** です。Windows / Spout は未実装ですが、出力は `SharedTextureOutput` trait で抽象化されており、将来の Spout バックエンド追加を見越した構成になっています。
+- **macOS / Syphon** — 実機検証済み（v1）。
+- **Windows / Spout** — コンパイル検証のみ（実機動作は未検証）。
 
 ## ライセンス / 第三者ソフトウェア
 

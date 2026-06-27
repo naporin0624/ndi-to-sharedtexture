@@ -6,6 +6,13 @@ Copyright 2010 bangnoise (Tom Butterworth) & vade (Anton Marini).
 Licensed under the BSD 3-Clause License. See the Syphon-Framework source for
 the full license text.
 
+Spout2 SDK
+https://github.com/leadedge/Spout2
+Copyright (c) 2014-2024 Lynn Jarvis.
+Licensed under the BSD 2-Clause License. The Spout2 SDK source is fetched into
+vendor/Spout2 at build time (see scripts/fetch-spout2.ps1) and is not committed
+to this repository. See the Spout2 source for the full license text.
+
 NDI(R) is a registered trademark of Vizrt NV. This tool links against the NDI
-runtime (libndi) installed separately by the user; no NDI SDK code is
-redistributed here.
+runtime (libndi / Processing.NDI.Lib) installed separately by the user; no NDI
+SDK code is redistributed here.

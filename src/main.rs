@@ -34,7 +34,12 @@ fn main() -> Result<()> {
     let receiver = Receiver::new(&ndi, &source, "ndi-share")?;
     let mut out = make_output(&server_name)?;
 
-    println!("Publishing '{}' as Syphon server '{}'. Ctrl-C to stop.", source.name, server_name);
+    println!(
+        "Publishing '{}' as {} server '{}'. Ctrl-C to stop.",
+        source.name,
+        output_kind(),
+        server_name
+    );
     run_loop(&receiver, &mut *out, args.verbose)
 }
 
@@ -91,9 +96,32 @@ fn make_output(name: &str) -> Result<Box<dyn SharedTextureOutput>> {
     Ok(Box::new(output::syphon::SyphonOutput::new(name)?))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn make_output(name: &str) -> Result<Box<dyn SharedTextureOutput>> {
+    Ok(Box::new(output::spout::SpoutOutput::new(name)?))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn make_output(_name: &str) -> Result<Box<dyn SharedTextureOutput>> {
-    Err(anyhow!("only macOS/Syphon output is implemented in v1"))
+    Err(anyhow!(
+        "no shared-texture backend on this platform (macOS=Syphon, Windows=Spout)"
+    ))
+}
+
+/// Human-facing name of the active shared-texture protocol.
+fn output_kind() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Syphon"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Spout"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "shared-texture"
+    }
 }
 
 fn run_loop(receiver: &Receiver, out: &mut dyn SharedTextureOutput, verbose: bool) -> Result<()> {

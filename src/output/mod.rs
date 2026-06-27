@@ -3,6 +3,9 @@
 #[cfg(target_os = "macos")]
 pub mod syphon;
 
+#[cfg(target_os = "windows")]
+pub mod spout;
+
 /// A borrowed view of one BGRA frame ready to publish.
 pub struct BgraFrame<'a> {
     pub data: &'a [u8],
