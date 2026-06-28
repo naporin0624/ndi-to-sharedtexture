@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/naporin0624/ndi-to-sharedtexture/compare/ndi-share-v0.2.1...ndi-share-v0.2.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **windows:** delay-load NDI DLL + Windows release CD ([ede6fc3](https://github.com/naporin0624/ndi-to-sharedtexture/commit/ede6fc36ba175c69d6be582ba960608b076c116c))
+* **windows:** delay-load NDI DLL and resolve it from the runtime dir ([d5aed96](https://github.com/naporin0624/ndi-to-sharedtexture/commit/d5aed96c8f1dd7fbd1b505d1060325f8dc41886d))
+
 ## [0.2.1](https://github.com/naporin0624/ndi-to-sharedtexture/compare/ndi-share-v0.2.0...ndi-share-v0.2.1) (2026-06-28)
 
 
