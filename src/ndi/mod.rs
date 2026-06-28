@@ -2,6 +2,9 @@
 
 pub mod sys;
 
+#[cfg(windows)]
+mod dll;
+
 use anyhow::{anyhow, Result};
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -20,6 +23,11 @@ pub struct Ndi {
 
 impl Ndi {
     pub fn new() -> Result<Ndi> {
+        // On Windows the NDI DLL is delay-loaded; point the loader at the NDI
+        // runtime directory before the first NDI call so it resolves without the
+        // DLL sitting next to the executable.
+        #[cfg(windows)]
+        dll::add_runtime_to_dll_path();
         if unsafe { sys::NDIlib_initialize() } {
             Ok(Ndi { _private: () })
         } else {
