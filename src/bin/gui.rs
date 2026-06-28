@@ -9,6 +9,43 @@ use eframe::egui;
 use ndi_share::ndi::{Finder, Ndi, Receiver, Source};
 use ndi_share::output::make_output;
 use ndi_share::run::run_capture_loop;
+use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+
+/// Owns the tray icon + the handles needed to update/route its menu.
+struct TrayState {
+    _icon: TrayIcon,
+    status: MenuItem,
+    quit_id: MenuId,
+}
+
+/// A tiny solid accent-blue square icon (32x32 RGBA), generated in code.
+fn tray_icon_image() -> tray_icon::Icon {
+    const N: u32 = 32;
+    let mut rgba = Vec::with_capacity((N * N * 4) as usize);
+    for _ in 0..(N * N) {
+        rgba.extend_from_slice(&[0x39, 0x96, 0xFF, 0xFF]);
+    }
+    tray_icon::Icon::from_rgba(rgba, N, N).expect("valid 32x32 RGBA icon")
+}
+
+/// Build the tray icon with a status line and Quit. Returns None on failure
+/// (the app still runs windowed without a tray).
+fn build_tray() -> Option<TrayState> {
+    let menu = Menu::new();
+    let status = MenuItem::new("Idle", true, None);
+    let quit = MenuItem::new("Quit", true, None);
+    menu.append(&status).ok()?;
+    menu.append(&PredefinedMenuItem::separator()).ok()?;
+    menu.append(&quit).ok()?;
+    let icon = TrayIconBuilder::new()
+        .with_tooltip("ndi-share")
+        .with_icon(tray_icon_image())
+        .with_menu(Box::new(menu))
+        .build()
+        .ok()?;
+    Some(TrayState { _icon: icon, status, quit_id: quit.id().clone() })
+}
 
 /// Install the bundled LINE Seed JP font and the cannelloni dark theme.
 fn install_style(ctx: &egui::Context) {
@@ -143,6 +180,7 @@ struct GuiApp {
     discovering: bool,
     disco_rx: Option<MpscReceiver<DiscoverMsg>>,
     running: Option<RunHandle>,
+    tray: Option<TrayState>,
 }
 
 impl GuiApp {
@@ -155,6 +193,7 @@ impl GuiApp {
             discovering: false,
             disco_rx: None,
             running: None,
+            tray: build_tray(),
         };
         app.start_discovery(ctx);
         app
@@ -289,6 +328,18 @@ impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_discovery();
         self.poll_running();
+
+        // Drain tray menu clicks.
+        while let Ok(ev) = MenuEvent::receiver().try_recv() {
+            let is_quit = self.tray.as_ref().map_or(false, |t| ev.id == t.quit_id);
+            if is_quit {
+                self.stop(); // signal + join any running worker
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+        // Drain tray icon clicks (kept for Task 5; harmless to consume now).
+        while TrayIconEvent::receiver().try_recv().is_ok() {}
+
         let ctx = ui.ctx().clone();
 
         ui.heading(format!("NDI \u{2192} {}", ndi_share::output::output_kind()));
@@ -345,6 +396,10 @@ impl eframe::App for GuiApp {
             ui.colored_label(egui::Color32::from_rgb(0x39, 0x96, 0xFF), "\u{25CF} Running");
         }
         ui.label(format!("info: {}", self.info_line()));
+
+        if let Some(tray) = &self.tray {
+            tray.status.set_text(format!("ndi-share — {}", self.info_line()));
+        }
 
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }

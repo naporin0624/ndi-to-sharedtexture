@@ -6,7 +6,7 @@ description = "Receive an NDI source and republish it as a Syphon Metal texture 
 
 [features]
 default = []
-gui = ["dep:eframe"]
+gui = ["dep:eframe", "dep:tray-icon"]
 
 [[bin]]
 name = "ndi-share"
@@ -26,6 +26,7 @@ clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
 anyhow = "1"
 eframe = { version = "0.35", optional = true }
+tray-icon = { version = "0.24", optional = true }
 
 [build-dependencies]
 cc = "1"
