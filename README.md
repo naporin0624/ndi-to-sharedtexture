@@ -59,7 +59,7 @@ ndi-share --source Cam --name "MyFeed"    # Syphon 公開名を指定（既定: 
 
 ## GUI（ランチャー）
 
-CLI と同じ動作を画面から操作できる、最小構成の GUI ランチャー `ndi-share-gui` も同梱しています（[egui](https://github.com/emilk/egui) 製）。ソースをドロップダウンから選び、公開名を入力して **Start / Stop** するだけです。
+CLI と同じ動作を画面から操作できる、最小構成の GUI ランチャー `ndi-share-gui` も同梱しています（[egui](https://github.com/emilk/egui) 製）。ソースをドロップダウンから選んで **Start / Stop** するだけです（公開名は選択したソース名になります）。
 
 > GUI を初めてビルドする前に、同梱フォント（LINE Seed JP）を取得してください:
 > ```bash
@@ -77,7 +77,6 @@ cargo build --release --features gui --bin ndi-share-gui
 操作:
 
 - **Source** — 検出された NDI ソースをドロップダウンから選択（**Refresh** で再検索）。
-- **Name** — Syphon の公開名（既定: 選択したソース名。手入力すると以降は自動追従しません）。
 - **Start / Stop** — 再配信の開始・停止。実行中は受信フレーム数がライブ表示されます。
 
 ソース検索も受信ループもワーカースレッドで動くため、UI は固まりません。macOS では CLI と同じ前提条件（Xcode・Metal Toolchain・`vendor/Syphon.framework`）が必要です。

@@ -42,7 +42,7 @@ receive the texture. Stop with Ctrl-C.
 
 A minimal GUI launcher `ndi-share-gui` (built with [egui](https://github.com/emilk/egui))
 ships alongside the CLI and exposes the same flow on screen: pick a source from a
-dropdown, set the server name, and **Start / Stop**.
+dropdown and **Start / Stop** (the server name is the selected source's name).
 
 > Before building the GUI for the first time, fetch the bundled font (LINE Seed JP):
 > ```bash
@@ -58,8 +58,6 @@ cargo build --release --features gui --bin ndi-share-gui
 ```
 
 - **Source** — pick a discovered NDI source from the dropdown (**Refresh** to re-scan).
-- **Name** — Syphon server name (defaults to the source name; once you edit it by
-  hand it no longer auto-follows the selection).
 - **Start / Stop** — begin/end republishing; the received frame count updates live.
 
 Discovery and the receive loop both run on worker threads, so the UI never freezes.
