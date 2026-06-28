@@ -73,6 +73,13 @@ fn link_ndi_windows() {
     let lib_dir = std::path::Path::new(&sdk_dir).join("Lib").join("x64");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=dylib=Processing.NDI.Lib.x64");
+
+    // Delay-load the NDI DLL so the loader does not resolve
+    // `Processing.NDI.Lib.x64.dll` at process startup. `ndi::dll` adds the NDI
+    // runtime directory (NDI_RUNTIME_DIR_Vx) to the search path before the first
+    // NDI call, so the app runs without copying the DLL next to the executable.
+    println!("cargo:rustc-link-arg=/DELAYLOAD:Processing.NDI.Lib.x64.dll");
+    println!("cargo:rustc-link-lib=dylib=delayimp");
 }
 
 #[cfg(target_os = "windows")]

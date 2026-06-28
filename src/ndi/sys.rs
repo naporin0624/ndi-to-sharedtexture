@@ -88,6 +88,10 @@ mod tests {
     #[test]
     fn initialize_links_and_succeeds() {
         // Proves the dylib is linked and the symbol resolves at runtime.
+        // On Windows the DLL is delay-loaded, so point the loader at the NDI
+        // runtime directory before the first (delay-loaded) NDI call.
+        #[cfg(windows)]
+        crate::ndi::dll::add_runtime_to_dll_path();
         assert!(unsafe { NDIlib_initialize() });
     }
 }
