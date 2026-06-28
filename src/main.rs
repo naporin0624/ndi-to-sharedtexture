@@ -1,15 +1,11 @@
-mod cli;
-mod ndi;
-mod output;
-
 use anyhow::{anyhow, Result};
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use cli::SourceMatch;
-use ndi::{CaptureResult, Finder, Ndi, Receiver, Source};
-use output::{BgraFrame, SharedTextureOutput};
+use ndi_share::cli::{self, SourceMatch};
+use ndi_share::ndi::{Finder, Ndi, Receiver, Source};
+use ndi_share::output::{self, output_kind, SharedTextureOutput};
 
 fn main() -> Result<()> {
     let args = cli::parse();
@@ -32,9 +28,14 @@ fn main() -> Result<()> {
     let server_name = args.name.clone().unwrap_or_else(|| source.name.clone());
 
     let receiver = Receiver::new(&ndi, &source, "ndi-share")?;
-    let mut out = make_output(&server_name)?;
+    let mut out = output::make_output(&server_name)?;
 
-    println!("Publishing '{}' as Syphon server '{}'. Ctrl-C to stop.", source.name, server_name);
+    println!(
+        "Publishing '{}' as {} server '{}'. Ctrl-C to stop.",
+        source.name,
+        output_kind(),
+        server_name
+    );
     run_loop(&receiver, &mut *out, args.verbose)
 }
 
@@ -86,53 +87,14 @@ fn prompt_select(sources: &[Source]) -> Result<Source> {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn make_output(name: &str) -> Result<Box<dyn SharedTextureOutput>> {
-    Ok(Box::new(output::syphon::SyphonOutput::new(name)?))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn make_output(_name: &str) -> Result<Box<dyn SharedTextureOutput>> {
-    Err(anyhow!("only macOS/Syphon output is implemented in v1"))
-}
-
 fn run_loop(receiver: &Receiver, out: &mut dyn SharedTextureOutput, verbose: bool) -> Result<()> {
     let running = Arc::new(AtomicBool::new(true));
     {
         let r = running.clone();
         ctrlc::set_handler(move || r.store(false, Ordering::SeqCst))?;
     }
-
-    let mut last_dims = (0u32, 0u32);
-    while running.load(Ordering::SeqCst) {
-        match receiver.capture(1000) {
-            CaptureResult::Video(frame) => {
-                let needed = (frame.stride() as usize).saturating_mul(frame.height() as usize);
-                if frame.data().len() < needed {
-                    if verbose {
-                        eprintln!("skipping malformed frame: data {} < needed {}", frame.data().len(), needed);
-                    }
-                    continue;
-                }
-                let dims = (frame.width(), frame.height());
-                if verbose && dims != last_dims {
-                    eprintln!("frame {}x{} stride={}", dims.0, dims.1, frame.stride());
-                    last_dims = dims;
-                }
-                let bgra = BgraFrame {
-                    data: frame.data(),
-                    width: frame.width(),
-                    height: frame.height(),
-                    stride: frame.stride(),
-                };
-                if let Err(e) = out.publish(&bgra) {
-                    eprintln!("publish error: {e}");
-                }
-            }
-            CaptureResult::Error => eprintln!("NDI capture error"),
-            CaptureResult::None => {} // timeout / non-video frame; keep polling
-        }
-    }
+    let frames = AtomicU64::new(0);
+    ndi_share::run::run_capture_loop(receiver, out, &running, &frames, verbose)?;
     println!("\nStopped.");
     Ok(())
 }

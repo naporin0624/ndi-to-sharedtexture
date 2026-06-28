@@ -57,9 +57,53 @@ ndi-share --source Cam --name "MyFeed"    # Syphon 公開名を指定（既定: 
 
 配信を受け取るには Syphon 対応アプリ（Resolume、Syphon Recorder、OBS の Syphon プラグインなど）を開いてください。停止は **Ctrl-C** です。
 
+## GUI（ランチャー）
+
+CLI と同じ動作を画面から操作できる、最小構成の GUI ランチャー `ndi-share-gui` も同梱しています（[egui](https://github.com/emilk/egui) 製）。ソースをドロップダウンから選んで **Start / Stop** するだけです（公開名は選択したソース名になります）。
+
+> GUI を初めてビルドする前に、同梱フォント（LINE Seed JP）を取得してください:
+> ```bash
+> ./scripts/fetch-fonts.sh   # vendor/fonts/ に LINE Seed JP を取得（初回のみ）
+> ```
+
+```bash
+# GUI は `gui` フィーチャの別バイナリ（CLI ビルドには含まれません）
+cargo run --release --features gui --bin ndi-share-gui
+# またはビルドだけして実行
+cargo build --release --features gui --bin ndi-share-gui
+./target/release/ndi-share-gui
+```
+
+操作:
+
+- **Source** — 検出された NDI ソースをドロップダウンから選択（**Refresh** で再検索）。
+- **Start / Stop** — 再配信の開始・停止。実行中は受信フレーム数がライブ表示されます。
+
+ソース検索も受信ループもワーカースレッドで動くため、UI は固まりません。macOS では CLI と同じ前提条件（Xcode・Metal Toolchain・`vendor/Syphon.framework`）が必要です。
+
+ウィンドウの **×** はアプリを終了せず、トレイ（macOS=メニューバー / Windows=通知領域）に格納します。格納中も再配信は継続します。トレイのアイコン／ステータス項目をクリックすると復帰、**Quit** で終了します。（**Cmd+Q**／Windows は **Ctrl+Q** でも終了します）。テーマはローカルの `cannelloni` を参考にしたダーク配色です。
+
+## Windows / Spout（実験的・未検証）
+
+Windows では Spout 出力に対応します（`SharedTextureOutput` trait による抽象化で、macOS=Syphon / Windows=Spout を切り替え）。
+
+> ⚠️ **注意:** Windows/Spout バックエンドは現状 **GitHub Actions（windows-latest）でのコンパイル検証のみ**で、実機での動作確認は未実施です。色順・上下反転・SpoutDX 初期化まわりは実機検証で調整が必要な可能性があります。
+
+ビルド手順（Windows / PowerShell）:
+
+```powershell
+./scripts/fetch-spout2.ps1            # vendor/Spout2 へ Spout2 SDK を取得
+# NDI SDK をインストール（Processing.NDI.Lib.x64.lib を提供）
+#   インストール先が標準と異なる場合は環境変数 NDI_SDK_DIR を設定
+cargo build --release
+```
+
+NDI のインポートライブラリは `%NDI_SDK_DIR%\Lib\x64\Processing.NDI.Lib.x64.lib`（既定 `C:\Program Files\NDI\NDI 6 SDK`）を参照します。実行時は NDI ランタイム DLL が PATH 上にある必要があります。受信は Spout 対応アプリ（Resolume、OBS の Spout プラグインなど）で行います。
+
 ## 対応範囲
 
-v1 は **macOS / Syphon のみ** です。Windows / Spout は未実装ですが、出力は `SharedTextureOutput` trait で抽象化されており、将来の Spout バックエンド追加を見越した構成になっています。
+- **macOS / Syphon** — 実機検証済み（v1）。
+- **Windows / Spout** — コンパイル検証のみ（実機動作は未検証）。
 
 ## ライセンス / 第三者ソフトウェア
 
