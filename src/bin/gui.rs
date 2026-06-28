@@ -324,6 +324,146 @@ impl GuiApp {
             }
         }
     }
+
+    fn handle_quit_shortcut(&mut self, ctx: &egui::Context) {
+        // Cmd/Ctrl+Q quits for real (the window ✕ only hides to tray).
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            self.quit(ctx);
+        }
+    }
+
+    fn handle_close_to_tray(&self, ctx: &egui::Context) {
+        // ✕ hides to tray instead of quitting; the receive worker keeps
+        // running. When `quitting` is set, let the Close through so eframe
+        // actually exits — don't cancel it.
+        if !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+    }
+
+    fn handle_tray_events(&mut self, ctx: &egui::Context) {
+        // Quit / show from the tray menu.
+        while let Ok(ev) = MenuEvent::receiver().try_recv() {
+            let is_quit = self.tray.as_ref().is_some_and(|t| ev.id == t.quit_id);
+            let is_show = self.tray.as_ref().is_some_and(|t| ev.id == t.status.id());
+            if is_quit {
+                self.quit(ctx);
+            } else if is_show {
+                show_window(ctx);
+            }
+        }
+        // Left-click / double-click on the tray icon → show the window.
+        while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
+            if matches!(
+                ev,
+                TrayIconEvent::Click { .. } | TrayIconEvent::DoubleClick { .. }
+            ) {
+                show_window(ctx);
+            }
+        }
+    }
+
+    fn draw_header(&self, ui: &mut egui::Ui) {
+        ui.heading(format!("NDI \u{2192} {}", bucatini::output::output_kind()));
+        ui.add_space(8.0);
+    }
+
+    fn draw_source_row(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        // Refresh icon pinned to the right at its natural width; the dropdown
+        // fills the remaining width to its left and truncates — so select +
+        // icon always fit the window, no pixel math.
+        ui.horizontal(|ui| {
+            ui.label("Source:");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(self.running.is_none() && !self.discovering, |ui| {
+                    if ui.button("\u{1F504}").on_hover_text("Refresh").clicked() {
+                        self.start_discovery(ctx);
+                    }
+                });
+                let combo_w = ui.available_width();
+                let sources = &self.sources;
+                let selected = &mut self.selected;
+                let label = sources
+                    .get(*selected)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| "(none)".to_owned());
+                ui.add_enabled_ui(self.running.is_none() && !sources.is_empty(), |ui| {
+                    egui::ComboBox::from_id_salt("ndi_source")
+                        .width(combo_w)
+                        .truncate()
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            for (i, s) in sources.iter().enumerate() {
+                                ui.selectable_value(selected, i, &s.name);
+                            }
+                        });
+                });
+            });
+        });
+    }
+
+    fn draw_controls(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let is_running = self.running.is_some();
+        let can_start = !self.sources.is_empty();
+        let mut start_clicked = false;
+        let mut stop_clicked = false;
+        ui.horizontal(|ui| {
+            if is_running {
+                stop_clicked = ui.button("\u{25A0} Stop").clicked();
+            } else {
+                start_clicked = ui
+                    .add_enabled(can_start, egui::Button::new("\u{25B6} Start"))
+                    .clicked();
+            }
+        });
+        if start_clicked {
+            self.start(ctx);
+        }
+        if stop_clicked {
+            self.stop();
+        }
+    }
+
+    fn draw_status(&self, ui: &mut egui::Ui) {
+        // Status row is always present (running=accent dot, idle=dim) so the
+        // line never appears/disappears and shifts the layout vertically.
+        if self.running.is_some() {
+            ui.colored_label(
+                egui::Color32::from_rgb(0x39, 0x96, 0xFF),
+                "\u{25CF} Running",
+            );
+        } else {
+            ui.colored_label(egui::Color32::from_rgb(0x69, 0x69, 0x69), "\u{25CB} Idle");
+        }
+        // Info line wraps within the window width, so a long status (frame
+        // count + source name) never widens the window.
+        ui.add(egui::Label::new(format!("info: {}", self.info_line())).wrap());
+    }
+
+    fn sync_tray_status(&self) {
+        if let Some(tray) = &self.tray {
+            // Tray menu is single-line: collapse the info newlines into separators.
+            tray.status.set_text(format!(
+                "Bucatini — {}",
+                self.info_line().replace('\n', " \u{30FB} ")
+            ));
+        }
+    }
+
+    fn fit_window(&mut self, ui: &egui::Ui, ctx: &egui::Context) {
+        // Fit the window height to the content (width stays fixed) so it is
+        // tight in both idle and running. Only resend when the content height
+        // actually changes.
+        let content_h = ui.min_rect().height() + 16.0;
+        if (content_h - self.fit_h).abs() > 1.0 {
+            self.fit_h = content_h;
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                400.0, content_h,
+            )));
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+    }
 }
 
 /// Run `Finder::list` off the UI thread, then wake the UI.
@@ -348,11 +488,8 @@ fn show_window(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 }
 
-// NOTE: eframe 0.35's `App` trait requires `fn ui(&mut self, ui: &mut egui::Ui,
-// frame: &mut Frame)` — the older `fn update(&mut self, ctx, frame)` does NOT
-// exist in 0.35. The `ui` param IS the central panel's Ui (the framework wraps
-// it for you), so build directly into `ui` — no `CentralPanel` wrapper. Get the
-// Context via `ui.ctx()` (clone it once up front for the worker spawns + repaint).
+// `App::ui` hands us the central panel's `Ui` directly (no `CentralPanel`
+// wrapper needed); obtain the `Context` via `ui.ctx()`.
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -360,131 +497,16 @@ impl eframe::App for GuiApp {
         self.poll_discovery();
         self.poll_running();
 
-        // Cmd/Ctrl+Q quits for real (the window ✕ only hides to tray).
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
-            self.quit(&ctx);
-        }
+        self.handle_quit_shortcut(&ctx);
+        self.handle_close_to_tray(&ctx);
+        self.handle_tray_events(&ctx);
 
-        // ✕ hides to tray instead of quitting; the receive worker keeps running.
-        // When `quitting` is true (tray Quit was chosen or Cmd/Ctrl+Q pressed),
-        // let the Close through so eframe actually exits — don't cancel it.
-        if !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-        }
-
-        // Quit / show from the tray menu.
-        while let Ok(ev) = MenuEvent::receiver().try_recv() {
-            let is_quit = self.tray.as_ref().is_some_and(|t| ev.id == t.quit_id);
-            let is_show = self.tray.as_ref().is_some_and(|t| ev.id == t.status.id());
-            if is_quit {
-                self.quit(&ctx);
-            } else if is_show {
-                show_window(&ctx);
-            }
-        }
-        // Left-click / double-click on the tray icon → show the window.
-        while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-            if matches!(
-                ev,
-                TrayIconEvent::Click { .. } | TrayIconEvent::DoubleClick { .. }
-            ) {
-                show_window(&ctx);
-            }
-        }
-
-        ui.heading(format!("NDI \u{2192} {}", bucatini::output::output_kind()));
-        ui.add_space(8.0);
-
-        // Source row: refresh icon pinned to the right (its natural width), the
-        // dropdown fills the remaining width to its left and truncates — so the
-        // select + icon always fit the window, no pixel math.
-        ui.horizontal(|ui| {
-            ui.label("Source:");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Rightmost item: the refresh icon (consumes only its own width).
-                ui.add_enabled_ui(self.running.is_none() && !self.discovering, |ui| {
-                    if ui.button("\u{1F504}").on_hover_text("Refresh").clicked() {
-                        self.start_discovery(&ctx);
-                    }
-                });
-                // The dropdown fills whatever width remains to the left.
-                let combo_w = ui.available_width();
-                let sources = &self.sources;
-                let selected = &mut self.selected;
-                let label = sources
-                    .get(*selected)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_else(|| "(none)".to_owned());
-                ui.add_enabled_ui(self.running.is_none() && !sources.is_empty(), |ui| {
-                    egui::ComboBox::from_id_salt("ndi_source")
-                        .width(combo_w)
-                        .truncate()
-                        .selected_text(label)
-                        .show_ui(ui, |ui| {
-                            for (i, s) in sources.iter().enumerate() {
-                                ui.selectable_value(selected, i, &s.name);
-                            }
-                        });
-                });
-            });
-        });
-
-        // Start / Stop.
-        let is_running = self.running.is_some();
-        let can_start = !self.sources.is_empty();
-        let mut start_clicked = false;
-        let mut stop_clicked = false;
-        ui.horizontal(|ui| {
-            if is_running {
-                stop_clicked = ui.button("\u{25A0} Stop").clicked();
-            } else {
-                start_clicked = ui
-                    .add_enabled(can_start, egui::Button::new("\u{25B6} Start"))
-                    .clicked();
-            }
-        });
-        if start_clicked {
-            self.start(&ctx);
-        }
-        if stop_clicked {
-            self.stop();
-        }
-
-        // Status row: always present (running=accent dot, idle=dim) so the line
-        // doesn't appear/disappear and shift the layout vertically.
-        if self.running.is_some() {
-            ui.colored_label(
-                egui::Color32::from_rgb(0x39, 0x96, 0xFF),
-                "\u{25CF} Running",
-            );
-        } else {
-            ui.colored_label(egui::Color32::from_rgb(0x69, 0x69, 0x69), "\u{25CB} Idle");
-        }
-        // Info line wraps within the window width, so a long status (frame count +
-        // source name) never widens the window — prevents horizontal layout shift.
-        ui.add(egui::Label::new(format!("info: {}", self.info_line())).wrap());
-
-        if let Some(tray) = &self.tray {
-            // Tray menu is single-line: collapse the info newlines into separators.
-            tray.status.set_text(format!(
-                "Bucatini — {}",
-                self.info_line().replace('\n', " \u{30FB} ")
-            ));
-        }
-
-        // Fit the window height to the content (width stays fixed) so it is tight
-        // in both idle and running without leaving an idle gap. Only resend when
-        // the content height actually changes.
-        let content_h = ui.min_rect().height() + 16.0;
-        if (content_h - self.fit_h).abs() > 1.0 {
-            self.fit_h = content_h;
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
-                400.0, content_h,
-            )));
-        }
-
-        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        self.draw_header(ui);
+        self.draw_source_row(ui, &ctx);
+        self.draw_controls(ui, &ctx);
+        self.draw_status(ui);
+        self.sync_tray_status();
+        self.fit_window(ui, &ctx);
     }
 }
 
