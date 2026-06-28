@@ -265,6 +265,14 @@ impl GuiApp {
         }
     }
 
+    /// Signal the worker to stop, join it, then send a Close to the viewport.
+    /// Call this for any real-quit path (tray Quit menu or Cmd/Ctrl+Q).
+    fn quit(&mut self, ctx: &egui::Context) {
+        self.quitting = true;
+        self.stop();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
     /// One-line status shown after `info:`.
     fn info_line(&self) -> String {
         if let Some(handle) = &self.running {
@@ -335,15 +343,22 @@ fn show_window(ctx: &egui::Context) {
 // Context via `ui.ctx()` (clone it once up front for the worker spawns + repaint).
 impl eframe::App for GuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         self.poll_discovery();
         self.poll_running();
 
+        // Cmd/Ctrl+Q quits for real (the window ✕ only hides to tray).
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            self.quit(&ctx);
+        }
+
         // ✕ hides to tray instead of quitting; the receive worker keeps running.
-        // When `quitting` is true (tray Quit was chosen), let the Close through
-        // so eframe actually exits — don't cancel it.
-        if !self.quitting && ui.ctx().input(|i| i.viewport().close_requested()) {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        // When `quitting` is true (tray Quit was chosen or Cmd/Ctrl+Q pressed),
+        // let the Close through so eframe actually exits — don't cancel it.
+        if !self.quitting && ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
 
         // Quit / show from the tray menu.
@@ -351,21 +366,17 @@ impl eframe::App for GuiApp {
             let is_quit = self.tray.as_ref().map_or(false, |t| ev.id == t.quit_id);
             let is_show = self.tray.as_ref().map_or(false, |t| ev.id == t.status.id());
             if is_quit {
-                self.quitting = true;
-                self.stop();
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                self.quit(&ctx);
             } else if is_show {
-                show_window(ui.ctx());
+                show_window(&ctx);
             }
         }
         // Left-click / double-click on the tray icon → show the window.
         while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
             if matches!(ev, TrayIconEvent::Click { .. } | TrayIconEvent::DoubleClick { .. }) {
-                show_window(ui.ctx());
+                show_window(&ctx);
             }
         }
-
-        let ctx = ui.ctx().clone();
 
         ui.heading(format!("NDI \u{2192} {}", ndi_share::output::output_kind()));
         ui.add_space(8.0);

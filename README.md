@@ -81,7 +81,7 @@ cargo build --release --features gui --bin ndi-share-gui
 
 ソース検索も受信ループもワーカースレッドで動くため、UI は固まりません。macOS では CLI と同じ前提条件（Xcode・Metal Toolchain・`vendor/Syphon.framework`）が必要です。
 
-ウィンドウの **×** はアプリを終了せず、トレイ（macOS=メニューバー / Windows=通知領域）に格納します。格納中も再配信は継続します。トレイのアイコン／ステータス項目をクリックすると復帰、**Quit** で終了します。テーマはローカルの `cannelloni` を参考にしたダーク配色です。
+ウィンドウの **×** はアプリを終了せず、トレイ（macOS=メニューバー / Windows=通知領域）に格納します。格納中も再配信は継続します。トレイのアイコン／ステータス項目をクリックすると復帰、**Quit** で終了します。（**Cmd+Q**／Windows は **Ctrl+Q** でも終了します）。テーマはローカルの `cannelloni` を参考にしたダーク配色です。
 
 ## Windows / Spout（実験的・未検証）
 

@@ -66,7 +66,7 @@ On macOS the GUI needs the same prerequisites as the CLI (Xcode, Metal Toolchain
 
 The window **✕** does not quit the app — it hides to the tray (macOS menu bar /
 Windows notification area) and republishing keeps running. Click the tray icon or
-its status item to restore the window; **Quit** exits. The theme is a dark palette
+its status item to restore the window; **Quit** exits. **Cmd+Q** (macOS) / **Ctrl+Q** (Windows/Linux) also quits. The theme is a dark palette
 referencing the local `cannelloni` project.
 
 ## Scope
