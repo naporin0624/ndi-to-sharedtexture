@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/naporin0624/bucatini/compare/bucatini-v0.3.0...bucatini-v0.4.0) (2026-06-30)
+
+
+### Features
+
+* **gui:** add group_thousands helper with thousands separators ([8ab2a1f](https://github.com/naporin0624/bucatini/commit/8ab2a1fdb28be95b9dfdb90835be2df4ec1ab5a8))
+* **gui:** contextual status block + WCAG AA color tokens ([d7d6a35](https://github.com/naporin0624/bucatini/commit/d7d6a35969d02654efe9860ac58188883ecc6e1e))
+* **gui:** 文脈的ステータス表示 + WCAG 2.1 AA カラートークン ([2c601c4](https://github.com/naporin0624/bucatini/commit/2c601c4b8f4e033726d4c666df434efdb289ae2f))
+
 ## [0.3.0](https://github.com/naporin0624/bucatini/compare/bucatini-v0.2.2...bucatini-v0.3.0) (2026-06-28)
 
 
